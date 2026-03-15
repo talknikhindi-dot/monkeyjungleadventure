@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monkey Jungle Adventure: Super Enemies! 🐒🦅🐝</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; background: linear-gradient(#87CEEB 0%, #4CAF50 100%); }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            font-size: 28px; font-weight: bold; text-shadow: 2px 2px 8px #000;
+            pointer-events: none; z-index: 10;
+        }
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); color: white; display: flex;
+            flex-direction: column; justify-content: center; align-items: center;
+            cursor: pointer; z-index: 20; text-align: center;
+        }
+        button { padding: 15px 30px; font-size: 20px; background: #FF9800; border: none; color: white; border-radius: 10px; cursor: pointer; margin-top: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    🍌 Score: <span id="score">0</span>
+</div>
+
+<div id="start-screen" onclick="startGame()">
+    <h1>MONKEY JUNGLE ADVENTURE</h1>
+    <p>Avoid Birds, Bats, Crows, & Bees!</p>
+    <p>Click/Space to Jump, Swing & Fly.</p>
+    <button>CLICK TO PLAY</button>
+</div>
+
+<script>
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let score = 0, cameraX = 0, gameActive = false;
+    const groundY = canvas.height - 100;
+
+    // Audio Setup
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration) {
+        if(!gameActive) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    }
+
+    const monkey = { x: 100, y: groundY - 50, vx: 6, vy: 0, state: 'RUNNING', ropeIndex: -1, angle: 0, angleVel: 0, rotation: 0 };
+    const ropes = [];
+    const enemies = [];
+
+    // Generate Ropes & Diverse Enemies
+    for (let i = 0; i < 400; i++) {
+        let rx = 500 + i * 400;
+        ropes.push({ x: rx, y: 0, length: 250 + Math.random() * 200 });
+        
+        // Add more enemies, different types
+        if (i % 2 === 0) {
+            let enemyType = 'BIRD';
+            if (i % 4 === 0) enemyType = 'BAT';
+            if (i % 6 === 0) enemyType = 'CROW';
+            if (i % 8 === 0) enemyType = 'BEE';
+
+            enemies.push({
+                x: rx + 200, y: 150 + Math.random() * 350,
+                type: enemyType,
+                speed: 3 + Math.random() * 4,
+                offset: Math.random() * Math.PI * 2
+            });
+        }
+    }
+
+    // --- DETAILED MONKEY DRAWING ---
+    function drawDetailedMonkey(x, y, rotation) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+
+        // Tail
+        ctx.strokeStyle = '#5d4037'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(5, 15); ctx.bezierCurveTo(40, 20, 30, -40, 50, -20); ctx.stroke();
+
+        // Legs
+        ctx.fillStyle = '#8d6e63';
+        ctx.fillRect(-12, 10, 8, 20); ctx.fillRect(4, 10, 8, 20); 
+
+        // Body
+        ctx.beginPath(); ctx.ellipse(0, 0, 22, 28, 0, 0, Math.PI * 2); ctx.fill();
+
+        // Hands
+        ctx.fillRect(-25, -5, 10, 15); ctx.fillRect(15, -5, 10, 15);
+
+        // Head
+        ctx.beginPath(); ctx.arc(0, -35, 18, 0, Math.PI * 2); ctx.fill();
+
+        // Ears
+        ctx.beginPath(); ctx.arc(-18, -38, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(18, -38, 6, 0, Math.PI * 2); ctx.fill();
+
+        // --- FACE (Clearer) ---
+        ctx.fillStyle = '#e0ac69';
+        ctx.beginPath();
+        ctx.ellipse(0, -32, 14, 12, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes (White with Black Pupils)
+        ctx.fillStyle = 'white';
+        ctx.beginPath(); ctx.arc(-6, -36, 4, 0, Math.PI * 2); ctx.fill(); // Left Eye
+        ctx.beginPath(); ctx.arc(6, -36, 4, 0, Math.PI * 2); ctx.fill();  // Right Eye
+        ctx.fillStyle = 'black';
+        ctx.beginPath(); ctx.arc(-6, -36, 2, 0, Math.PI * 2); ctx.fill(); // Pupil 1
+        ctx.beginPath(); ctx.arc(6, -36, 2, 0, Math.PI * 2); ctx.fill();  // Pupil 2
+
+        // Nose
+        ctx.beginPath(); ctx.arc(0, -30, 2, 0, Math.PI * 2); ctx.fill();
+
+        // Mouth (Smile)
+        ctx.strokeStyle = '#5d4037';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(0, -28, 5, 0.2, Math.PI - 0.2, false); ctx.stroke();
+
+        // Wings (if flying)
+        if (monkey.state === 'FLYING') {
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.beginPath(); ctx.ellipse(-30, -10, 20, 10, Math.PI/4, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(30, -10, 20, 10, -Math.PI/4, 0, Math.PI*2); ctx.fill();
+        }
+
+        ctx.restore();
+    }
+
+    // --- DETAILED ENEMIES DRAWING ---
+    function drawEnemy(e) {
+        ctx.save();
+        ctx.translate(e.x, e.y + Math.sin(Date.now() * 0.005 + e.offset) * 30);
+        
+        let wingSwing = Math.sin(Date.now() * 0.02) * 20;
+
+        if (e.type === 'BIRD') {
+            // Bird (Red)
+            ctx.fillStyle = '#f44336';
+            ctx.beginPath(); ctx.ellipse(0, 0, 22, 18, 0, 0, Math.PI * 2); ctx.fill(); // Body
+            // Head
+            ctx.beginPath(); ctx.arc(15, -5, 10, 0, Math.PI*2); ctx.fill();
+            // Eye
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(18, -8, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(20, -8, 2, 0, Math.PI*2); ctx.fill();
+            // Beak
+            ctx.fillStyle = '#FFEB3B'; ctx.beginPath(); ctx.moveTo(25, -5); ctx.lineTo(35, 0); ctx.lineTo(25, 5); ctx.fill();
+            // Wings
+            ctx.fillStyle = '#b71c1c'; ctx.beginPath(); ctx.ellipse(-5, wingSwing, 18, 10, Math.PI/4, 0, Math.PI*2); ctx.fill();
+        } 
+        else if (e.type === 'BAT') {
+            // Bat (Purple/Black)
+            ctx.fillStyle = '#4a148c';
+            ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI*2); ctx.fill(); // Body
+            // Ears
+            ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(-18, -28); ctx.lineTo(-4, -15); ctx.fill(); 
+            ctx.beginPath(); ctx.moveTo(12, -12); ctx.lineTo(18, -28); ctx.lineTo(4, -15); ctx.fill();
+            // Eyes
+            ctx.fillStyle = '#ffff00'; ctx.beginPath(); ctx.arc(-6, -4, 4, 0, Math.PI*2); ctx.arc(6, -4, 4, 0, Math.PI*2); ctx.fill();
+            // Fangs
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.moveTo(-5, 6); ctx.lineTo(-3, 12); ctx.lineTo(-1, 6); ctx.fill();
+            // Wings
+            ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.ellipse(-30, wingSwing, 30, 18, 0, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(30, wingSwing, 30, 18, 0, 0, Math.PI*2); ctx.fill();
+        }
+        else if (e.type === 'CROW') {
+            // Crow (Black/Gray)
+            ctx.fillStyle = '#212121';
+            ctx.beginPath(); ctx.ellipse(0, 0, 25, 15, 0, 0, Math.PI * 2); ctx.fill(); // Body
+            // Head
+            ctx.beginPath(); ctx.arc(18, -8, 12, 0, Math.PI*2); ctx.fill();
+            // Eye
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(22, -10, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(24, -10, 2, 0, Math.PI*2); ctx.fill();
+            // Sharp Beak
+            ctx.fillStyle = '#424242'; ctx.beginPath(); ctx.moveTo(28, -8); ctx.lineTo(45, -5); ctx.lineTo(28, 0); ctx.fill();
+            // Wings
+            ctx.fillStyle = '#424242'; ctx.beginPath(); ctx.ellipse(-8, wingSwing, 22, 12, Math.PI/4, 0, Math.PI*2); ctx.fill();
+        }
+        else if (e.type === 'BEE') {
+            // Poison Bee (Yellow/Black Stripes)
+            // Body with Stripes
+            for(let stripe=0; stripe<5; stripe++){
+                ctx.fillStyle = stripe % 2 === 0 ? '#FFD600' : '#000000';
+                ctx.beginPath(); ctx.ellipse(stripe*8 - 16, 0, 6, 15, 0, 0, Math.PI*2); ctx.fill();
+            }
+            // Head
+            ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.arc(20, -5, 10, 0, Math.PI*2); ctx.fill();
+            // Eye
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(24, -8, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(26, -8, 2, 0, Math.PI*2); ctx.fill();
+            // Stinger
+            ctx.fillStyle = '#bf360c'; ctx.beginPath(); ctx.moveTo(-22, 0); ctx.lineTo(-35, 0); ctx.lineTo(-22, 5); ctx.fill();
+            // Tiny Wings
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.beginPath(); ctx.ellipse(0, wingSwing - 10, 12, 6, -Math.PI/6, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(10, wingSwing - 10, 12, 6, Math.PI/6, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function update() {
+        if (!gameActive) return;
+
+        if (monkey.state === 'SWINGING') {
+            let rope = ropes[monkey.ropeIndex];
+            monkey.angleVel += Math.cos(monkey.angle) * 0.0035;
+            monkey.angleVel *= 0.993;
+            monkey.angle += monkey.angleVel;
+            monkey.x = rope.x + Math.sin(monkey.angle) * rope.length;
+            monkey.y = rope.y + Math.cos(monkey.angle) * rope.length;
+            monkey.rotation = monkey.angle;
+        } else if (monkey.state === 'RUNNING') {
+            monkey.x += monkey.vx; monkey.y = groundY - 45;
+            monkey.rotation = Math.sin(monkey.x * 0.1) * 0.05;
+        } else { 
+            monkey.vy += 0.22; monkey.x += monkey.vx; monkey.y += monkey.vy;
+            if (monkey.rotation < Math.PI*2) monkey.rotation += 0.1;
+            if (monkey.y >= groundY - 45) { monkey.y = groundY - 45; monkey.state = 'RUNNING'; monkey.vy = 0; monkey.rotation = 0;}
+        }
+
+        // Enemy Collision
+        enemies.forEach(e => {
+            let enemySwing = Math.sin(Date.now() * 0.005 + e.offset) * 30;
+            let d = Math.hypot(monkey.x - e.x, monkey.y - (e.y + enemySwing));
+            if (d < 45) { 
+                playSound(100, 'sawtooth', 0.4); 
+                gameActive = false;
+                alert("Game Over! Score: " + score); 
+                location.reload(); 
+            }
+        });
+
+        // Catching Rope
+        if (monkey.state !== 'SWINGING' && monkey.vy >= 0) {
+            ropes.forEach((rope, index) => {
+                let d = Math.hypot(monkey.x - rope.x, monkey.y - (rope.y + rope.length));
+                if (d < 50) { 
+                    monkey.state = 'SWINGING'; monkey.ropeIndex = index; 
+                    monkey.angle = Math.atan2(monkey.x - rope.x, monkey.y - rope.y); 
+                    monkey.angleVel = 0.13; score += 10;
+                    document.getElementById('score').innerText = score;
+                    playSound(600, 'sine', 0.1);
+                }
+            });
+        }
+        cameraX = monkey.x - 200;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Ground
+        ctx.fillStyle = '#1B5E20'; ctx.fillRect(0, groundY, canvas.width, 100);
+
+        ctx.save(); ctx.translate(-cameraX, 0);
+        
+        // Ropes
+        ropes.forEach(rope => {
+            ctx.strokeStyle = '#4e342e'; ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.moveTo(rope.x, 0);
+            ctx.lineTo(monkey.state==='SWINGING'&&ropes[monkey.ropeIndex]===rope?monkey.x:rope.x, monkey.state==='SWINGING'&&ropes[monkey.ropeIndex]===rope?monkey.y:rope.y+rope.length);
+            ctx.stroke();
+            ctx.fillStyle = '#212121'; ctx.beginPath(); ctx.arc(rope.x, 0, 8, 0, Math.PI*2); ctx.fill();
+        });
+
+        enemies.forEach(drawEnemy);
+        drawDetailedMonkey(monkey.x, monkey.y, monkey.rotation);
+
+        ctx.restore();
+        update(); requestAnimationFrame(draw);
+    }
+
+    function startGame() { gameActive = true; document.getElementById('start-screen').style.display = 'none'; audioCtx.resume(); }
+    
+    function handleInput() {
+        if(gameActive){ 
+            playSound(400, 'triangle', 0.1); 
+            if(monkey.state==='SWINGING'){ 
+                monkey.vx=Math.cos(monkey.angle)*16; 
+                monkey.vy=-Math.sin(monkey.angle)*16; 
+                monkey.state='FLYING'; 
+            } else { 
+                monkey.vy=-12; 
+                monkey.state='FLYING'; 
+            } 
+        }
+    }
+
+    window.addEventListener('mousedown', handleInput);
+    window.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); });
+    window.addEventListener('keydown', (e) => { if(e.code === 'Space') handleInput(); });
+
+    draw();
+</script>
+</body>
+</html>
